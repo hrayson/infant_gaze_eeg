@@ -1,0 +1,187 @@
+library("lme4")
+library("car")
+library("lsmeans")
+library("Rmisc")
+library("ggplot2")
+
+output_file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_stats.txt'
+sink(output_file)
+
+#For observation
+data <-read.csv(file= '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/obs_saccade_cue.csv')
+data$Subject<-as.factor(data$Subject)
+# Select data in mu band, 4 WOIs, and C, O, or F region
+#data<-data[data$FreqBand =='mu' & (data$WOI =='0-500ms'|data$WOI =='500-1000ms'|data$WOI == '1000-1500ms'| data$WOI =='1500-2000ms') & (data$Region=='C' | data$Region=='O'| data$Region=='F'),]
+data<-data[data$FreqBand =='mu' & (data$WOI =='0-500ms'|data$WOI =='500-1000ms'|data$WOI == '1000-1500ms'| data$WOI =='1500-2000ms') & (data$Region=='C' | data$Region=='O'| data$Region=='F'| data$Region=='P'),]
+# Rename hemisphere/region combinations to clusters
+data$Cluster<-''
+data$Cluster[data$Region == 'C' & data$Hemisphere == 'left']<-'C3'
+data$Cluster[data$Region == 'C' & data$Hemisphere == 'right']<-'C4'
+data$Cluster[data$Region == 'F' & data$Hemisphere == 'left']<-'F3'
+data$Cluster[data$Region == 'F' & data$Hemisphere == 'right']<-'F4'
+data$Cluster[data$Region == 'P' & data$Hemisphere == 'left']<-'P3'
+data$Cluster[data$Region == 'P' & data$Hemisphere == 'right']<-'P4'
+data$Cluster[data$Region == 'O' & data$Hemisphere == 'left']<-'O1'
+data$Cluster[data$Region == 'O' & data$Hemisphere == 'right']<-'O2'
+data$Cluster<-as.factor(data$Cluster)
+
+# Summarize results over subjects - compute mean, SE
+data_summary<-summarySE(data, measurevar="ERD", groupvars=c("Condition","Cluster","WOI","Age","Hemisphere","Region"))
+# Make WOI levels appear in correct order
+data_summary$WOIf<-factor(data_summary$WOI, levels=c('0-500ms','500-1000ms','1000-1500ms','1500-2000ms'))
+data_summary$Regionf<-factor(data_summary$Region, levels=c('F','C','P','O'))
+
+# Do one sample t-tests for each condition/cluster/woi/age to compare against baseline
+data$p<-0.0
+conditions<-unique(data_summary$Condition)
+clusters<-unique(data_summary$Cluster)
+wois<-unique(data_summary$WOI)
+ages<-unique(data_summary$Age)
+for(i in 1:length(conditions)) {
+	condition <- conditions[i]
+	for(j in 1:length(clusters)) {
+		cluster <- clusters[j]
+		for(k in 1:length(wois)) {
+			woi <- wois[k]
+			for(l in 1:length(ages)) {
+				age <- ages[l]
+				t_data <- data[data$Condition==condition & data$Cluster==cluster & data$WOI==woi & data$Age==age,]
+				res<-t.test(t_data$ERD)
+				data_summary$p[data_summary$Condition==condition & data_summary$Cluster==cluster & data_summary$WOI==woi & data_summary$Age==age]<-res$p.value
+			}
+		}
+	}
+}
+# Create *'s depending on p value
+data_summary$star <- ""
+data_summary$star[data_summary$p <= .05]  <- "*"
+data_summary$star[data_summary$p <= .01]  <- "**"
+data_summary$star[data_summary$p <= .001] <- "***"
+
+# Plot
+dodge<-position_dodge(width=0.9)
+g<-ggplot(data_summary, aes(x=Cluster, y=ERD, fill=Condition))+facet_grid(WOIf~Age)+geom_bar(position=dodge, stat="identity")+geom_errorbar(aes(ymin=ERD-se,ymax=ERD+se),width=0.4,position=dodge)+geom_text(position=dodge, aes(y=ERD-se,label=star), colour="red", vjust=1.25, size=5)+theme_bw(base_size=12)+ylim(-45,20)
+print(g)
+
+# Saves model fit plots as png and eps
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd.png', width=12, height=7)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd.eps', width=12, height=7)
+
+dev.new()
+pd <- position_dodge(0.1)
+g<-ggplot(data_summary,aes(x=WOIf,y=ERD,color=Condition,linetype=Age,group=interaction(Condition,Age)))+geom_errorbar(aes(ymin=ERD-se, ymax=ERD+se), width=.1, color='black', position=pd)+geom_line(position=pd)+geom_point(position=pd,size=3,shape=21,fill='white')+facet_grid(Regionf~Hemisphere)+xlab('Time window')+ylab('ERD')+theme_bw()+theme(legend.justification=c(1,0))
+print(g)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd_all.png', width=12, height=10)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd_all.eps', width=12, height=10)
+
+dev.new()
+c4_p4_summary=data_summary[data_summary$Cluster=='C4' | data_summary$Cluster=='P4',]
+pd <- position_dodge(0.1)
+g<-ggplot(c4_p4_summary,aes(x=WOIf,y=ERD,color=Condition,linetype=Age,group=interaction(Condition,Age)))+geom_errorbar(aes(ymin=ERD-se, ymax=ERD+se), width=.1, color='black', position=pd)+geom_line(position=pd)+geom_point(position=pd,size=3,shape=21,fill='white')+facet_grid(~Cluster)+xlab('Time window')+ylab('ERD')+theme_bw()+theme(legend.justification=c(1,0),legend.position=c(1,0))
+print(g)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd_c4p4.png', width=12, height=7)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/obs/mu_erd_c4p4.eps', width=12, height=7)
+
+
+basic_model <- lmer(ERD ~ Age*Cluster*Condition*WOI + (1+Condition|Subject), data = data, REML=FALSE, control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e6)))
+print(Anova(basic_model))
+
+cluster2<-lsmeans(basic_model,pairwise~Cluster*Age|Cluster)
+print(summary(cluster2)$contrasts)
+
+# Included when including P
+condition1<-lsmeans(basic_model,pairwise~Condition*Age|Age)
+print(summary(condition1)$contrasts)
+
+condition2<-lsmeans(basic_model,pairwise~Condition*Age|Condition)
+print(summary(condition2)$contrasts)
+
+condition3<-lsmeans(basic_model,pairwise~Cluster*Condition|Cluster)
+print(summary(condition3)$contrasts)
+
+woi1<-lsmeans(basic_model,pairwise~WOI*Age|WOI)
+print(summary(woi1)$contrasts)
+
+cluster3<-lsmeans(basic_model,pairwise~Cluster*WOI|Cluster)
+print(summary(cluster3)$contrasts)
+
+sink()
+
+
+output_file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/exe/mu_stats.txt'
+sink(output_file)
+
+#For execution
+data <-read.csv(file= '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/exe.csv')
+data$Subject<-as.factor(data$Subject)
+# Select data in mu band, 2 WOIs, and C, O, or F region
+#data<-data[data$FreqBand =='mu' & (data$WOI == '-500-0ms'| data$WOI =='0-500ms') & (data$Region=='C' | data$Region=='O' | data$Region=='F'),]
+data<-data[data$FreqBand =='mu' & (data$WOI == '-500-0ms'| data$WOI =='0-500ms') & (data$Region=='C' | data$Region=='O' | data$Region=='F' | data$Region=='P'),]
+# Rename hemisphere/region combinations to clusters
+data$Cluster<-''
+data$Cluster[data$Region == 'C' & data$Hemisphere == 'left']<-'C3'
+data$Cluster[data$Region == 'C' & data$Hemisphere == 'right']<-'C4'
+data$Cluster[data$Region == 'F' & data$Hemisphere == 'left']<-'F3'
+data$Cluster[data$Region == 'F' & data$Hemisphere == 'right']<-'F4'
+data$Cluster[data$Region == 'P' & data$Hemisphere == 'left']<-'P3'
+data$Cluster[data$Region == 'P' & data$Hemisphere == 'right']<-'P4'
+data$Cluster[data$Region == 'O' & data$Hemisphere == 'left']<-'O1'
+data$Cluster[data$Region == 'O' & data$Hemisphere == 'right']<-'O2'
+data$Cluster<-as.factor(data$Cluster)
+
+# Summarize results over subjects - compute mean, SE
+data_summary<-summarySE(data, measurevar="ERD", groupvars=c("Cluster","WOI","Age","Hemisphere","Region"))
+# Make WOI levels appear in correct order
+data_summary$WOIf<-factor(data_summary$WOI, levels=c('-500-0ms','0-500ms'))
+data_summary$Regionf<-factor(data_summary$Region, levels=c('F','C','P','O'))
+
+# Do one sample t-tests for each cluster/woi/age to compare against baseline
+data_summary$p<-0.0
+clusters<-unique(data_summary$Cluster)
+wois<-unique(data_summary$WOI)
+ages<-unique(data_summary$Age)
+for(j in 1:length(clusters)) {
+	cluster <- clusters[j]
+	for(k in 1:length(wois)) {
+		woi <- wois[k]
+		for(l in 1:length(ages)) {
+			age <- ages[l]
+			t_data <- data[data$Cluster==cluster & data$WOI==woi & data$Age==age,]
+			res<-t.test(t_data$ERD)
+			data_summary$p[data_summary$Cluster==cluster & data_summary$WOI==woi & data_summary$Age==age]<-res$p.value
+		}
+	}
+}
+# Create *'s depending on p value
+data_summary$star <- ""
+data_summary$star[data_summary$p <= .05]  <- "*"
+data_summary$star[data_summary$p <= .01]  <- "**"
+data_summary$star[data_summary$p <= .001] <- "***"
+
+# plot
+dev.new()
+dodge<-position_dodge(width=0.9)
+g<-ggplot(data_summary, aes(x=Cluster, y=ERD, fill=Age))+facet_grid(WOIf~.)+geom_bar(position=dodge, stat="identity")+geom_errorbar(aes(ymin=ERD-se,ymax=ERD+se),width=0.4,position=dodge)+geom_text(position=dodge, aes(y=ERD-se,label=star), colour="red", vjust=1.25, size=5)+theme_bw(base_size=12)
+print(g)
+
+# Saves model fit plots as png and eps
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/exe/mu_erd.png')
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/exe/mu_erd.eps')
+
+dev.new()
+pd <- position_dodge(0.1)
+g<-ggplot(data_summary,aes(x=WOIf,y=ERD,linetype=Age,group=Age))+geom_errorbar(aes(ymin=ERD-se, ymax=ERD+se), width=.1, color='black', position=pd)+geom_line(position=pd)+geom_point(position=pd,size=3,shape=21,fill='white')+facet_grid(Regionf~Hemisphere)+xlab('Time window')+ylab('ERD')+theme_bw()+theme(legend.justification=c(1,0),legend.position=c(1,0))
+print(g)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/exe/mu_erd_tc.png', width=6, height=12)
+ggsave(file = '/home/jbonaiuto/Dropbox/joint_attention/infant_gaze_eeg/erd/erd_results/exe/mu_erd_tc.eps', width=6, height=12)
+
+basic_model <- lmer(ERD ~ Age*Cluster*WOI + (1|Subject), data = data, REML=FALSE, control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e6)))
+print(Anova(basic_model))
+
+woi<-lsmeans(basic_model,pairwise~WOI)
+print(summary(woi)$contrasts)
+
+cluster2<-lsmeans(basic_model,pairwise~Cluster*Age|Cluster)
+print(summary(cluster2)$contrasts)
+
+sink()
